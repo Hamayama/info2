@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2015-8-27 v1.03
+;; 2015-8-27 v1.04
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -75,7 +75,7 @@
   (cond-expand
    [gauche.os.windows
     (or (sys-getenv "PAGER")
-        ;(find-file-in-paths "less.exe")
+        ;(find-file-in-paths "less.exe") ; Windows console has a problem
         (find-file-in-paths "more.com"))
     ]
    [else
@@ -86,19 +86,10 @@
   )
 
 (define viewer
-  (if
-      (cond-expand
-       [gauche.os.windows
-        (or (equal? (sys-getenv "TERM") "emacs")
-            (equal? (sys-getenv "TERM") "dumb")
-            (not *pager*))
-        ]
-       [else
-        (or (equal? (sys-getenv "TERM") "emacs")
-            (equal? (sys-getenv "TERM") "dumb")
-            (not (sys-isatty (current-output-port)))
-            (not *pager*))
-        ])
+  (if (or (equal? (sys-getenv "TERM") "emacs")
+          (equal? (sys-getenv "TERM") "dumb")
+          (not (sys-isatty (current-output-port)))
+          (not *pager*))
     display
     (^s
      (let1 p (run-process *pager* :input :pipe)
