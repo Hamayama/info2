@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2015-8-27 v1.02
+;; 2015-8-27 v1.03
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -121,8 +121,8 @@
            (find-file-in-paths (string-append info-file plus)
                                :paths paths
                                :pred (^p (or (file-is-readable? p)
-                                             (file-is-readable? #"~|p|.gz")
-                                             (file-is-readable? #"~|p|.bz2")))))
+                                             (file-is-readable? #`",|p|.gz")
+                                             (file-is-readable? #`",|p|.bz2")))))
          *info-file-plus*)
         (errorf "couldn't find info file ~s in paths: ~s" info-file paths))
     ))
