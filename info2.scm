@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2015-8-27 v1.04
+;; 2015-8-29 v1.05
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -86,10 +86,19 @@
   )
 
 (define viewer
-  (if (or (equal? (sys-getenv "TERM") "emacs")
-          (equal? (sys-getenv "TERM") "dumb")
-          (not (sys-isatty (current-output-port)))
-          (not *pager*))
+  (if
+      (cond-expand
+       [gauche.os.windows
+        (or (equal? (sys-getenv "TERM") "emacs")
+            (equal? (sys-getenv "TERM") "dumb")
+            (not *pager*))
+        ]
+       [else
+        (or (equal? (sys-getenv "TERM") "emacs")
+            (equal? (sys-getenv "TERM") "dumb")
+            (not (sys-isatty (current-output-port)))
+            (not *pager*))
+        ])
     display
     (^s
      (let1 p (run-process *pager* :input :pipe)
