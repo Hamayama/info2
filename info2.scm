@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2015-8-29 v1.05
+;; 2015-9-7 v1.06
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -140,7 +140,8 @@
                             (info-get-node info1 nodename))
                           *index-node-name*)
         (dolist [p (info-parse-menu node1)]
-          (hash-table-put! info1-index (car p) (cdr p)))
+          (hash-table-put! info1-index (car p)
+                                       (if (pair? (cdr p)) (cadr p) (cdr p))))
         (errorf "no index in info file ~s" info-file))
       (hash-table-put! *info-table*       info-file info1)
       (hash-table-put! *info-index-table* info-file info1-index))
