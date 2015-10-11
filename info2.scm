@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2015-9-7 v1.06
+;; 2015-10-11 v1.07
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -41,6 +41,15 @@
 ;;     このため、Gauche の将来のバージョンアップで動かなくなる可能性があります。
 ;;   ・Gauche の infoファイルの格納先は、以下のコマンドで確認可能です。
 ;;     gauche-config --infodir
+;;   ・検索する infoファイルには、手続きの索引のノードがある必要があります。
+;;     そして、そのノード名が、info2.scm 内の *index-node-name* の項目のいずれかと
+;;     一致している必要があります。
+;;   ・Gauche v0.9.5_pre1 で info 手続きの仕様が変わり、指定した手続きの説明のみを
+;;     表示するようになりました。
+;;     これに追従して info2 手続きも、可能な場合は、指定した手続きの説明のみを
+;;     表示するようにしました。
+;;     以前と同様に章全体を表示したい場合は、info2-page 手続きを使用してください。
+;;     info2-page 手続きの書式は、info2 手続きと同様です。
 ;;
 (define-module info2
   (use srfi-1)
@@ -50,7 +59,7 @@
   (use gauche.process)
   (use gauche.config)
   (use gauche.charconv)
-  (export info2))
+  (export info2 info2-page))
 (select-module info2)
 
 (define *info-file-default* "gauche-refe.info")
@@ -127,7 +136,7 @@
         (errorf "couldn't find info file ~s in paths: ~s" info-file paths))
     ))
 
-(define (info2 fn :optional (info-file-sym #f) (ces #f) (cache-reset #f))
+(define (info2-sub fn :optional (info-file-sym #f) (ces #f) (cache-reset #f) (page-flag #f))
   (let* ((info-file   (if info-file-sym
                         (x->string info-file-sym)
                         *info-file-default*))
@@ -136,21 +145,31 @@
     (when (or (not info1) cache-reset)
       (set! info1       (open-info-file (find-info-file info-file)))
       (set! info1-index (make-hash-table 'string=?))
-      (if-let1 node1 (any (lambda (nodename)
-                            (info-get-node info1 nodename))
-                          *index-node-name*)
-        (dolist [p (info-parse-menu node1)]
+      (if-let1 node (any (lambda (nodename)
+                           (info-get-node info1 nodename))
+                         *index-node-name*)
+        (dolist [p (info-parse-menu node)]
           (hash-table-put! info1-index (car p)
-                                       (if (pair? (cdr p)) (cadr p) (cdr p))))
+                                       ;; for Gauche v0.9.4 compatibility
+                                       (if (pair? (cdr p)) (cdr p) (list (cdr p)))))
         (errorf "no index in info file ~s" info-file))
       (hash-table-put! *info-table*       info-file info1)
       (hash-table-put! *info-index-table* info-file info1-index))
-    (if-let1 nodename (hash-table-get info1-index (x->string fn) #f)
-      (let1 str (ref (info-get-node info1 nodename) 'content)
+    (if-let1 node&line (hash-table-get info1-index (x->string fn) #f)
+      (let* ((node (info-get-node info1 (car node&line)))
+             (str  (if (or (null? (cdr node&line)) page-flag)
+                     (~ node 'content)
+                     (info-extract-definition node (cadr node&line)))))
         (if ces (set! str (ces-convert str (gauche-character-encoding) ces)))
         (viewer str))
       (errorf "no info document for ~a" fn))
     (values)))
+
+(define (info2 fn :optional (info-file-sym #f) (ces #f) (cache-reset #f))
+  (info2-sub fn info-file-sym ces cache-reset #f))
+
+(define (info2-page fn :optional (info-file-sym #f) (ces #f) (cache-reset #f))
+  (info2-sub fn info-file-sym ces cache-reset #t))
 
 
 
