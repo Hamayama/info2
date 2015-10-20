@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2015-10-11 v1.07
+;; 2015-10-20 v1.08
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -222,4 +222,62 @@
                 [body (next-token #[\n] '(#[\u001f] *eof*))])
            (loop (read-char) (acons head body r)))))))
   )
+
+;; API
+;; Extract one definition from the node's content.  Assumes the definition
+;; begins from the specified line; then we go forward to find the end of
+;; the definition.  The end of definition is when we see the end of content,
+;; or we see a line begins with less than or equal to 3 whitespaces.
+;; (Except the 'defunx'-type multi entry)
+(define (info-extract-definition info-node start-line)
+
+  ;; Skip the lines before the entry.
+  ;; START-LINE counts from the beginning of the info doc; the first 3 lines
+  ;; are taken by the node header and the node's content doesn't include them.
+  ;; Also note that line count starts from 1.
+  ;;
+  ;; Caveat: If the entry header spans multiple lines because of large
+  ;; number of arguments, the texinfo menu's line number somehow points to the
+  ;; last line of the entry header.  For example, the entry of http-get
+  ;; begins with this:
+  ;;
+  ;;   -- Function: http-get server request-uri :key sink flusher
+  ;;        redirect-handler secure ...
+  ;;
+  ;; And the texinfo menu's line points to "redirect-handler secure ..." line
+  ;; instead of "-- Function: http-get" line.  So we have to check the lines
+  ;; to find out the last #/^ --/ line before START-LINE.
+  (define (skip-lines)
+    (let loop ([n (- start-line 4)]
+               [lines '()])
+      ;(if (= n 0)
+      (if (<= n 0)
+        (let1 line (read-line)
+          ; for header printing problem (ex. (info 'set!) )
+          ;(unless (#/^ --/ line) (for-each print (reverse lines)))
+          (for-each print (reverse lines))
+          line)
+        (let1 line (read-line)
+          (cond [(eof-object? line) line]  ;something's wrong, but tolerate.
+                ; for header printing problem (ex. (info 'cdr) )
+                ;[(#/^ --/ line) (loop (- n 1) (list line))]
+                [(#/^ --/ line) (loop (- n 1) (cons line lines))]
+                [(#/^ {10}/ line) (loop (- n 1) (cons line lines))]
+                [else (loop (- n 1) '())])))))
+  
+  (with-string-io (~ info-node'content)
+    (^[]
+      (let entry ([line (skip-lines)])
+        (unless (eof-object? line)
+          (cond [(#/^ --/ line) (print line) (entry (read-line))]
+                [(#/^$/ line)] ;; no description
+                [(#/^ {6}/ line) ;; folded entry line
+                 (print line) (entry (read-line))]
+                [(#/^ {5}\S/ line) ;; start description
+                 (print line)
+                 (let desc ([line (read-line)])
+                   (unless (eof-object? line)
+                     (cond [(#/^$/ line) (print) (desc (read-line))]
+                           [(#/^ {4}/ line) (print line) (desc (read-line))]
+                           [else])))]))))))
 
