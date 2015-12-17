@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2015-10-21 v1.09
+;; 2015-12-17 v1.10
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -72,13 +72,16 @@
 (define *index-node-name*
   (cond-expand
    [gauche.ces.none
-    '("Function and Syntax Index")
+    '("Function and Syntax Index" ; default
+      "Function Index"            ; gauche-al-refe.info
+      )
     ]
    [else
-    '("Function and Syntax Index"
-      "Index - 手続きと構文索引" ; gauche-refj.info
-      "手続きと構文索引"         ; gauche-gl-refj.info
-      "手続き索引"               ; gauche-al-refj.info
+    '("Function and Syntax Index" ; default
+      "Function Index"            ; gauche-al-refe.info
+      "Index - 手続きと構文索引"  ; gauche-refj.info
+      "手続きと構文索引"          ; gauche-gl-refj.info
+      "手続き索引"                ; gauche-al-refj.info
       )
     ])
   )
