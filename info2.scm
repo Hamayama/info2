@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2015-12-17 v1.10
+;; 2015-12-19 v1.11
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -88,41 +88,43 @@
 (define *info-table*        (make-hash-table 'equal?))
 (define *info-index-table*  (make-hash-table 'equal?))
 
-(define *pager*
-  (cond-expand
-   [gauche.os.windows
-    (or (sys-getenv "PAGER")
-        ;(find-file-in-paths "less.exe") ; Windows console has a problem
-        (find-file-in-paths "more.com"))
-    ]
-   [else
-    (or (sys-getenv "PAGER")
-        (find-file-in-paths "less")
-        (find-file-in-paths "more"))
-    ])
-  )
-
-(define viewer
-  (if
-      (cond-expand
-       [gauche.os.windows
-        (or (equal? (sys-getenv "TERM") "emacs")
-            (equal? (sys-getenv "TERM") "dumb")
-            (not *pager*))
-        ]
-       [else
-        (or (equal? (sys-getenv "TERM") "emacs")
-            (equal? (sys-getenv "TERM") "dumb")
-            (not (sys-isatty (current-output-port)))
-            (not *pager*))
-        ])
-    display
-    (^s
-     (let1 p (run-process *pager* :input :pipe)
-       (guard (e (else #f))
-         (display s (process-input p)))
-       (close-output-port (process-input p))
-       (process-wait p)))))
+(define (viewer str)
+  (define pager
+    (cond-expand
+     [gauche.os.windows
+      (or (sys-getenv "PAGER")
+          ;; These commands don't work well on Windows console.
+          ;(find-file-in-paths "less.exe") ; it has a problem of display wide characters.
+          ;(find-file-in-paths "more.com") ; it works only when ces is a kind of Shift_JIS.
+          )
+      ]
+     [else
+      (or (sys-getenv "PAGER")
+          (find-file-in-paths "less")
+          (find-file-in-paths "more"))
+      ])
+    )
+  (define (pager-available?)
+    (cond-expand
+     [gauche.os.windows
+      (and (not (equal? (sys-getenv "TERM") "emacs"))
+           (not (equal? (sys-getenv "TERM") "dumb"))
+           pager)
+      ]
+     [else
+      (and (not (equal? (sys-getenv "TERM") "emacs"))
+           (not (equal? (sys-getenv "TERM") "dumb"))
+           (sys-isatty (current-output-port))
+           pager)
+      ])
+    )
+  (if (pager-available?)
+    (let1 p (run-process pager :input :pipe)
+      (guard (e (else #f))
+        (display str (process-input p)))
+      (close-output-port (process-input p))
+      (process-wait p))
+    (display str)))
 
 (define (get-info-paths)
   (let* ([syspath (cond [(sys-getenv "INFOPATH") => (cut string-split <> #\:)]
