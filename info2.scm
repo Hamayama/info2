@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2015-12-19 v1.11
+;; 2015-12-21 v1.12
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -94,8 +94,8 @@
      [gauche.os.windows
       (or (sys-getenv "PAGER")
           ;; These commands don't work well on Windows console.
-          ;(find-file-in-paths "less.exe") ; it has a problem of display wide characters.
-          ;(find-file-in-paths "more.com") ; it works only when ces is a kind of Shift_JIS.
+          ;(find-file-in-paths "less.exe") ; It has a problem of printing wide characters.
+          ;(find-file-in-paths "more.com") ; It works only when ces is a kind of Shift_JIS.
           )
       ]
      [else
@@ -159,9 +159,10 @@
                            (info-get-node info1 nodename))
                          *index-node-name*)
         (dolist [p (info-parse-menu node)]
+          ;; For Gauche v0.9.4 compatibility
+          ;(hash-table-put! info1-index (car p) (cdr p)))
           (hash-table-put! info1-index (car p)
-                                       ;; for Gauche v0.9.4 compatibility
-                                       (if (pair? (cdr p)) (cdr p) (list (cdr p)))))
+                           (if (pair? (cdr p)) (cdr p) (list (cdr p)))))
         (errorf "no index in info file ~s" info-file))
       (hash-table-put! *info-table*       info-file info1)
       (hash-table-put! *info-index-table* info-file info1-index))
@@ -187,7 +188,7 @@
 
 (use gauche.charconv)
 
-;; overwrite some definitions in text.info module.
+;; Overwrite some definitions in text.info module.
 
 ;; Find bzip2 location
 (define bzip2
@@ -216,7 +217,7 @@
                      (unwind-protect (with-input-from-port cp thunk)
                        (close-input-port cp))))))]
           [(and bzip2 (file-exists? #`",|file|.bz2"))
-           ;; for Windows, file name should be surrounded in quotation marks.
+           ;; For Windows, a file name should be surrounded in quotation marks.
            (call-with-input-process #`",bzip2 -c -d ',|file|.bz2'"
              (^p (let1 cp (wrap-with-input-conversion p "*JP") ; encoding conversion
                    (unwind-protect (with-input-from-port cp thunk)
@@ -263,13 +264,13 @@
       ;(if (= n 0)
       (if (<= n 0)
         (let1 line (read-line)
-          ; for header printing problem (ex. (info 'set!) )
+          ;; For header printing problem (e.g. (info 'set!) )
           ;(unless (#/^ --/ line) (for-each print (reverse lines)))
           (for-each print (reverse lines))
           line)
         (let1 line (read-line)
           (cond [(eof-object? line) line]  ;something's wrong, but tolerate.
-                ; for header printing problem (ex. (info 'cdr) )
+                ;; For header printing problem (e.g. (info 'cdr) )
                 ;[(#/^ --/ line) (loop (- n 1) (list line))]
                 [(#/^ --/ line) (loop (- n 1) (cons line lines))]
                 [(#/^ {10}/ line) (loop (- n 1) (cons line lines))]
