@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2015-12-21 v1.12
+;; 2016-1-1 v1.13
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -259,16 +259,20 @@
   ;; instead of "-- Function: http-get" line.  So we have to check the lines
   ;; to find out the last #/^ --/ line before START-LINE.
   (define (skip-lines)
-    (let loop ([n (- start-line 4)]
+    ;; On makeinfo v6.0, start-line is decremented by one.
+    ;(let loop ([n (- start-line 4)]
+    (let loop ([n (- start-line 3)]
                [lines '()])
       ;(if (= n 0)
       (if (<= n 0)
         (let1 line (read-line)
+          ;(print n " " line)
           ;; For header printing problem (e.g. (info 'set!) )
           ;(unless (#/^ --/ line) (for-each print (reverse lines)))
           (for-each print (reverse lines))
           line)
         (let1 line (read-line)
+          ;(print "+" n " " line)
           (cond [(eof-object? line) line]  ;something's wrong, but tolerate.
                 ;; For header printing problem (e.g. (info 'cdr) )
                 ;[(#/^ --/ line) (loop (- n 1) (list line))]
