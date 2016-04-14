@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2016-4-14 v1.14
+;; 2016-4-14 v1.15
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -32,8 +32,9 @@
 ;;     また、第3引数は省略可能です。省略した場合は #f を指定したことになります。
 ;;   ・第4引数の ces2 には、検索結果が複数存在した場合に出力するセクション名の
 ;;     文字エンコーディングを指定します。
-;;     第4引数に #f を指定すると、文字エンコーディングは ces1 と同じものになります。
-;;     また、第4引数は省略可能です。省略した場合は #f を指定したことになります。
+;;     第4引数に #f を指定すると、文字エンコーディングは未指定になります。
+;;     第4引数に #t を指定すると、文字エンコーディングは ces1 と同じものになります。
+;;     また、第4引数は省略可能です。省略した場合は #t を指定したことになります。
 ;;   ・第5引数の cache-reset には、キャッシュをリセットするかどうかを指定します。
 ;;     すでに読み込んだ infoファイルは、キャッシュに保存され高速検索が可能になりますが、
 ;;     本引数に #t を指定すると、キャッシュを破棄してファイルを再読み込みします。
@@ -55,7 +56,7 @@
 ;;     以前と同様に章全体を表示したい場合は、info2-page 手続きを使用してください。
 ;;     info2-page 手続きの書式は、info2 手続きと同様です。
 ;;   ・例えば if 手続きのように 検索結果が複数存在する項目については、対応する
-;;     セクション名が表示されます。そこで、番号を入力すると、選択したセクションの
+;;     各セクション名が表示されます。そこで、番号を入力すると、選択したセクションの
 ;;     説明文が表示されます。
 ;;
 (define-module info2
@@ -232,7 +233,8 @@
          (info&index (get-info&index info-file cache-reset))
          (info1      (car info&index))
          (index1     (cdr info&index)))
-    ($ lookup&show fn index1 (or ces2 ces1)
+    (if (eq? ces2 #t) (set! ces2 ces1))
+    ($ lookup&show fn index1 ces2
        (^[node&line]
          (let* ((node (info-get-node info1 (car node&line)))
                 (str  (if (or (null? (cdr node&line)) page-flag)
@@ -242,11 +244,11 @@
     (values)))
 
 ;; API
-(define (info2 fn :optional (info-file-sym #f) (ces1 #f) (ces2 #f) (cache-reset #f))
+(define (info2 fn :optional (info-file-sym #f) (ces1 #f) (ces2 #t) (cache-reset #f))
   (info2-sub fn info-file-sym ces1 ces2 cache-reset #f))
 
 ;; API
-(define (info2-page fn :optional (info-file-sym #f) (ces1 #f) (ces2 #f) (cache-reset #f))
+(define (info2-page fn :optional (info-file-sym #f) (ces1 #f) (ces2 #t) (cache-reset #f))
   (info2-sub fn info-file-sym ces1 ces2 cache-reset #t))
 
 
