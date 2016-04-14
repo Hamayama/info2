@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2016-1-1 v1.13
+;; 2016-4-14 v1.14
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -20,20 +20,24 @@
 ;;
 ;;   info2 手続きの書式は以下の通りです。
 ;;
-;;   info2  name  [file]  [ces]  [cache-reset]
+;;   info2  name  [file]  [ces1]  [ces2]  [cache-reset]
 ;;   ・第1引数の name には、調べたい手続きの名前をシンボルか文字列で指定します。
 ;;   ・第2引数の file には、infoファイルの名前をシンボルか文字列で指定します。
 ;;     このとき、ファイル名の末尾の .info または -refe.info は省略可能です。
 ;;     また、第2引数全体も省略可能です。省略した場合は gauche-refe.info が
 ;;     読み込まれます。
-;;   ・第3引数の ces には、出力する文字のエンコーディングを指定します。
+;;   ・第3引数の ces1 には、出力する説明文の文字エンコーディングを指定します。
 ;;     例えば、Windowsのコンソールに日本語を出力する場合は 'SJIS を指定してください。
-;;     第3引数に #f を指定すると、エンコーディングは未指定になります。
+;;     第3引数に #f を指定すると、文字エンコーディングは未指定になります。
 ;;     また、第3引数は省略可能です。省略した場合は #f を指定したことになります。
-;;   ・第4引数の cache-reset には、キャッシュをリセットするかどうかを指定します。
+;;   ・第4引数の ces2 には、検索結果が複数存在した場合に出力するセクション名の
+;;     文字エンコーディングを指定します。
+;;     第4引数に #f を指定すると、文字エンコーディングは ces1 と同じものになります。
+;;     また、第4引数は省略可能です。省略した場合は #f を指定したことになります。
+;;   ・第5引数の cache-reset には、キャッシュをリセットするかどうかを指定します。
 ;;     すでに読み込んだ infoファイルは、キャッシュに保存され高速検索が可能になりますが、
 ;;     本引数に #t を指定すると、キャッシュを破棄してファイルを再読み込みします。
-;;     第4引数は省略可能です。省略した場合は #f を指定したことになります。
+;;     第5引数は省略可能です。省略した場合は #f を指定したことになります。
 ;;
 ;; ＜注意事項＞
 ;;   ・本モジュールは、gauche.interactive.info をベースに改造しました。
@@ -46,24 +50,25 @@
 ;;     一致している必要があります。
 ;;   ・Gauche v0.9.5_pre1 で info 手続きの仕様が変わり、指定した手続きの説明のみを
 ;;     表示するようになりました。
-;;     これに追従して info2 手続きも、可能な場合には、指定した手続きの説明のみを
-;;     表示するようにしました。
+;;     これに追従して info2 手続きも、v0.9.5_pre1 以後で可能な場合には、指定した
+;;     手続きの説明のみを表示するようにしました。
 ;;     以前と同様に章全体を表示したい場合は、info2-page 手続きを使用してください。
 ;;     info2-page 手続きの書式は、info2 手続きと同様です。
-;;   ・例えば if 手続きのように 複数の検索結果が存在する項目については、
-;;     (info2 "if <1>") のように記述すれば、2番目の結果を表示することができます。
-;;     そして、もし存在するならば < > 内の数字を増やすことで、さらにその先の結果を
-;;     表示できます。
-;;     ただし、結果が存在しなかったり、同じ内容が表示される場合もあります。
+;;   ・例えば if 手続きのように 検索結果が複数存在する項目については、対応する
+;;     セクション名が表示されます。そこで、番号を入力すると、選択したセクションの
+;;     説明文が表示されます。
 ;;
 (define-module info2
   (use srfi-1)
   (use srfi-13)
   (use text.info)
   (use file.util)
+  (use util.match)
   (use gauche.process)
   (use gauche.config)
+  (use gauche.sequence)
   (use gauche.charconv)
+  (use gauche.version)
   (export info2 info2-page))
 (select-module info2)
 
@@ -72,16 +77,29 @@
 (define *index-node-name*
   (cond-expand
    [gauche.ces.none
-    '("Function and Syntax Index" ; default
+    '("Function and Syntax Index" ; gauche-refe.info, gauche-gl-refe.info
       "Function Index"            ; gauche-al-refe.info
+      "Module Index"              ; gauche-refe.info, gauche-gl-refe.info
+      "Class Index"               ; gauche-refe.info, gauche-gl-refe.info, gauche-al-refe.info
+      "Variable Index"            ; gauche-refe.info, gauche-gl-refe.info, gauche-al-refe.info
       )
     ]
    [else
-    '("Function and Syntax Index" ; default
+    '("Function and Syntax Index" ; gauche-refe.info, gauche-gl-refe.info
       "Function Index"            ; gauche-al-refe.info
+      "Module Index"              ; gauche-refe.info, gauche-gl-refe.info
+      "Class Index"               ; gauche-refe.info, gauche-gl-refe.info, gauche-al-refe.info
+      "Variable Index"            ; gauche-refe.info, gauche-gl-refe.info, gauche-al-refe.info
+      ;; Japanese
       "Index - 手続きと構文索引"  ; gauche-refj.info
       "手続きと構文索引"          ; gauche-gl-refj.info
       "手続き索引"                ; gauche-al-refj.info
+      "Index - モジュール索引"    ; gauche-refj.info
+      "モジュール索引"            ; gauche-gl-refj.info
+      "Index - クラス索引"        ; gauche-refj.info
+      "クラス索引"                ; gauche-gl-refj.info, gauche-al-refj.info
+      "Index - 変数索引"          ; gauche-refj.info
+      "変数索引"                  ; gauche-gl-refj.info, gauche-al-refj.info
       )
     ])
   )
@@ -109,13 +127,15 @@
      [gauche.os.windows
       (and (not (equal? (sys-getenv "TERM") "emacs"))
            (not (equal? (sys-getenv "TERM") "dumb"))
-           pager)
+           pager
+           #t)
       ]
      [else
       (and (not (equal? (sys-getenv "TERM") "emacs"))
            (not (equal? (sys-getenv "TERM") "dumb"))
            (sys-isatty (current-output-port))
-           pager)
+           pager
+           #t)
       ])
     )
   (if (pager-available?)
@@ -146,41 +166,88 @@
         (errorf "couldn't find info file ~s in paths: ~s" info-file paths))
     ))
 
-(define (info2-sub fn :optional (info-file-sym #f) (ces #f) (cache-reset #f) (page-flag #f))
-  (let* ((info-file   (if info-file-sym
-                        (x->string info-file-sym)
-                        *info-file-default*))
-         (info1       (hash-table-get *info-table*       info-file #f))
-         (info1-index (hash-table-get *info-index-table* info-file #f)))
+(define (get-info&index info-file cache-reset)
+  (let ((info1  (hash-table-get *info-table*       info-file #f))
+        (index1 (hash-table-get *info-index-table* info-file #f)))
     (when (or (not info1) cache-reset)
-      (set! info1       (open-info-file (find-info-file info-file)))
-      (set! info1-index (make-hash-table 'string=?))
-      (if-let1 node (any (lambda (nodename)
-                           (info-get-node info1 nodename))
-                         *index-node-name*)
-        (dolist [p (info-parse-menu node)]
-          ;; For Gauche v0.9.4 compatibility
-          ;(hash-table-put! info1-index (car p) (cdr p)))
-          (hash-table-put! info1-index (car p)
-                           (if (pair? (cdr p)) (cdr p) (list (cdr p)))))
-        (errorf "no index in info file ~s" info-file))
+      (set! info1  (open-info-file (find-info-file info-file)))
+      (set! index1 (make-hash-table 'string=?))
+      (let ((node       #f)
+            (entry-name "")
+            (hit-flag   #f)
+            (class-flag #f))
+        (dolist [node-name *index-node-name*]
+          (set! class-flag (if (#/(class|クラス)/i node-name) #t #f))
+          (set! node (info-get-node info1 node-name))
+          (when node
+            (dolist [p (info-parse-menu node)]
+              (set! entry-name (car p))
+              (if-let1 m (#/ <\d+>$/ entry-name)
+                (set! entry-name (rxmatch-before m)))
+              (if class-flag
+                (set! entry-name #"<~|entry-name|>"))
+              ;; For Gauche v0.9.4 compatibility
+              ;(hash-table-push! index1 entry-name (cdr p)))
+              (hash-table-push! index1 entry-name
+                                (if (pair? (cdr p)) (cdr p) (list (cdr p)))))
+            (set! hit-flag #t)))
+        (if (not hit-flag) (errorf "no index in info file ~s" info-file)))
       (hash-table-put! *info-table*       info-file info1)
-      (hash-table-put! *info-index-table* info-file info1-index))
-    (if-let1 node&line (hash-table-get info1-index (x->string fn) #f)
-      (let* ((node (info-get-node info1 (car node&line)))
-             (str  (if (or (null? (cdr node&line)) page-flag)
-                     (~ node 'content)
-                     (info-extract-definition node (cadr node&line)))))
-        (if ces (set! str (ces-convert str (gauche-character-encoding) ces)))
-        (viewer str))
-      (errorf "no info document for ~a" fn))
+      (hash-table-put! *info-index-table* info-file index1))
+    (cons info1 index1)))
+
+(define (ces-conv-str ces str)
+  (if ces (ces-convert str (gauche-character-encoding) ces) str))
+
+(define (lookup&show key index1 ces2 show)
+  (match (reverse (hash-table-get index1 (x->string key) '()))
+    [()  (print "No info document for " key)]
+    [(e) (show e)]
+    [(es ...)
+     (print "There are multiple entries for " key ":")
+     (for-each-with-index
+      (^[i e]
+        (print (ces-conv-str ces2 (format #f "~2d. ~s" (+ i 1) (car e)))))
+      es)
+     (let loop ()
+       (format #t "Select number, or q to cancel [1]: ") (flush)
+       ;; For Gauche v0.9.4 compatibility
+       (if (version<=? (gauche-version) "0.9.4") (read-line))
+       (rxmatch-case (read-line)
+         [test eof-object? #f]
+         [#/^\s*$/ (_) (show (car es))]  ; the first entry by default
+         [#/^\s*(\d+)\s*$/ (_ N)
+          (let1 n (- (x->integer N) 1)
+            (if (and (<= 0 n) (< n (length es)))
+              (show (list-ref es n))
+              (loop)))]
+         [#/^\s*q\s*$/ (_) #f]
+         [else (loop)]))])
+  (values))
+
+(define (info2-sub fn info-file-sym ces1 ces2 cache-reset page-flag)
+  (let* ((info-file  (if info-file-sym
+                       (x->string info-file-sym)
+                       *info-file-default*))
+         (info&index (get-info&index info-file cache-reset))
+         (info1      (car info&index))
+         (index1     (cdr info&index)))
+    ($ lookup&show fn index1 (or ces2 ces1)
+       (^[node&line]
+         (let* ((node (info-get-node info1 (car node&line)))
+                (str  (if (or (null? (cdr node&line)) page-flag)
+                        (~ node 'content)
+                        (info-extract-definition node (cadr node&line)))))
+           (viewer (ces-conv-str ces1 str)))))
     (values)))
 
-(define (info2 fn :optional (info-file-sym #f) (ces #f) (cache-reset #f))
-  (info2-sub fn info-file-sym ces cache-reset #f))
+;; API
+(define (info2 fn :optional (info-file-sym #f) (ces1 #f) (ces2 #f) (cache-reset #f))
+  (info2-sub fn info-file-sym ces1 ces2 cache-reset #f))
 
-(define (info2-page fn :optional (info-file-sym #f) (ces #f) (cache-reset #f))
-  (info2-sub fn info-file-sym ces cache-reset #t))
+;; API
+(define (info2-page fn :optional (info-file-sym #f) (ces1 #f) (ces2 #f) (cache-reset #f))
+  (info2-sub fn info-file-sym ces1 ces2 cache-reset #t))
 
 
 
