@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2016-4-15 v1.16
+;; 2016-5-7 v1.17
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -208,7 +208,7 @@
      (print "There are multiple entries for " key ":")
      (for-each-with-index
       (^[i e]
-        (print (ces-conv-str ces2 (format #f "~2d. ~s" (+ i 1) (car e)))))
+        (print (ces-conv-str ces2 (format "~2d. ~s" (+ i 1) (car e)))))
       es)
      (let loop ()
        (format #t "Select number, or q to cancel [1]: ") (flush)
