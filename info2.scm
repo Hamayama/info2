@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2016-5-7 v1.17
+;; 2016-10-27 v1.18
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするための
@@ -83,8 +83,7 @@
       "Module Index"              ; gauche-refe.info, gauche-gl-refe.info
       "Class Index"               ; gauche-refe.info, gauche-gl-refe.info, gauche-al-refe.info
       "Variable Index"            ; gauche-refe.info, gauche-gl-refe.info, gauche-al-refe.info
-      )
-    ]
+      )]
    [else
     '("Function and Syntax Index" ; gauche-refe.info, gauche-gl-refe.info
       "Function Index"            ; gauche-al-refe.info
@@ -101,51 +100,52 @@
       "クラス索引"                ; gauche-gl-refj.info, gauche-al-refj.info
       "Index - 変数索引"          ; gauche-refj.info
       "変数索引"                  ; gauche-gl-refj.info, gauche-al-refj.info
-      )
-    ])
-  )
+      )]))
 (define *info-table*        (make-hash-table 'equal?))
 (define *info-index-table*  (make-hash-table 'equal?))
 
-(define (viewer str)
-  (define pager
-    (cond-expand
-     [gauche.os.windows
-      (or (sys-getenv "PAGER")
-          ;; These commands don't work well on Windows console.
-          ;(find-file-in-paths "less.exe") ; It has a problem of printing wide characters.
-          ;(find-file-in-paths "more.com") ; It works only when ces is a kind of Shift_JIS.
-          )
-      ]
-     [else
-      (or (sys-getenv "PAGER")
-          (find-file-in-paths "less")
-          (find-file-in-paths "more"))
-      ])
-    )
-  (define (pager-available?)
-    (cond-expand
-     [gauche.os.windows
-      (and (not (equal? (sys-getenv "TERM") "emacs"))
-           (not (equal? (sys-getenv "TERM") "dumb"))
-           pager
-           #t)
-      ]
-     [else
-      (and (not (equal? (sys-getenv "TERM") "emacs"))
-           (not (equal? (sys-getenv "TERM") "dumb"))
-           (sys-isatty (current-output-port))
-           pager
-           #t)
-      ])
-    )
-  (if (pager-available?)
-    (let1 p (run-process pager :input :pipe)
-      (guard (e (else #f))
-        (display str (process-input p)))
-      (close-output-port (process-input p))
-      (process-wait p))
-    (display str)))
+(define *pager* #f)
+
+(define (get-pager)
+  (cond-expand
+   [gauche.os.windows
+    (or (sys-getenv "PAGER")
+        ;; These commands don't work well on Windows console.
+        ;(find-file-in-paths "less.exe") ; It has a problem of printing wide characters.
+        ;(find-file-in-paths "more.com") ; It works only when ces is a kind of Shift_JIS.
+        )]
+   [else
+    (or (sys-getenv "PAGER")
+        (find-file-in-paths "less")
+        (find-file-in-paths "more"))]))
+
+(define (viewer-pager s)
+  (let1 p (run-process
+           (cond-expand
+            ;; for MSYS (mintty)
+            [gauche.os.windows `("cmd.exe" "/c" ,*pager*)]
+            [else              *pager*])
+           :input :pipe)
+    (guard (e (else #f))
+      (display s (process-input p)))
+    (close-output-port (process-input p))
+    (process-wait p)))
+
+(define (viewer-dumb s) (display s))
+
+(define viewer
+  (lambda (s)
+    (set! *pager* (get-pager))
+    (cond [(or (equal? (sys-getenv "TERM") "emacs")
+               (equal? (sys-getenv "TERM") "dumb")
+               (cond-expand
+                ;; for MSYS (mintty)
+                [gauche.os.windows]
+                [else (not (sys-isatty (current-output-port)))])
+               (not *pager*))
+           (viewer-dumb s)]
+          [else
+           (viewer-pager s)])))
 
 (define (get-info-paths)
   (let* ([syspath (cond [(sys-getenv "INFOPATH") => (cut string-split <> #\:)]
@@ -263,12 +263,9 @@
 (define bzip2
   (cond-expand
    [gauche.os.windows
-    (find-file-in-paths "bzip2.exe")
-    ]
+    (find-file-in-paths "bzip2.exe")]
    [else
-    (find-file-in-paths "bzip2")
-    ])
-  )
+    (find-file-in-paths "bzip2")]))
 
 ;; Read an info file FILE, and returns a list of strings splitted by ^_ (#\u001f)
 ;; If FILE is not found, look for compressed one.
@@ -348,16 +345,21 @@
                 [(#/^ --/ line) (loop (- n 1) (cons line lines))]
                 [(#/^ {10}/ line) (loop (- n 1) (cons line lines))]
                 [else (loop (- n 1) '())])))))
-  
+
+  ;; Once the start line is found, we find the start of description (since
+  ;; the entry may have multiple entry line, e.g. @defunx.) then scan the
+  ;; description until we get an emtpy line.
   (with-string-io (~ info-node'content)
     (^[]
       (let entry ([line (skip-lines)])
         (unless (eof-object? line)
           (cond [(#/^ --/ line) (print line) (entry (read-line))]
-                [(#/^$/ line)] ;; no description
-                [(#/^ {6}/ line) ;; folded entry line
+                [(#/^$/ line)]       ;; no description
+                [(#/^ {6}/ line)     ;; folded entry line
                  (print line) (entry (read-line))]
-                [(#/^ {5}\S/ line) ;; start description
+                [(#/^ {5}...$/ line) ;; dots between entry line
+                 (print line) (entry (read-line))]
+                [(#/^ {5}\S/ line)   ;; start description
                  (print line)
                  (let desc ([line (read-line)])
                    (unless (eof-object? line)
