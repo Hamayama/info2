@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-8-20 v1.20
+;; 2017-8-21 v1.21
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -107,7 +107,7 @@
         (find-file-in-paths "more")
         )]))
 
-(define (viewer-pager s)
+(define (viewer-pager s ces)
   (let1 p (run-process
            (cond-expand
             ;; for MSYS (mintty)
@@ -115,51 +115,55 @@
             [else              *pager*])
            :input :pipe)
     (guard (e (else #f))
-      (display s (process-input p)))
+      (with-output-conversion (process-input p)
+        (cut display s) :encoding (or ces "none")))
     (close-output-port (process-input p))
     (process-wait p)))
 
-(define (viewer-dumb s) (display s))
+(define (viewer-dumb s ces)
+  (with-output-conversion (current-output-port)
+    (cut display s) :encoding (or ces "none")))
 
-(define (viewer-nounicode s)
-  (display ($ regexp-replace-all* s
-              #/\u21d2/ "==>"      ; @result{}
-              #/\u2026/ "..."      ; @dots{}
-              #/\u2018/ "`"        ; @code{}
-              #/\u2019/ "'"        ; @code{}
-              #/\u201C/ "``"       ; ``         (e.g. ,i do)
-              #/\u201D/ "''"       ; ''         (e.g. ,i do)
-              #/\u2261/ "=="       ; @equiv{}   (e.g. ,i cut)
-              #/\u2212/ "-"        ; @minus     (e.g. ,i modulo)
-              #/\u2022/ "*"        ; @bullet    (e.g. ,i lambda)
-              #/\u2013/ "--"       ; --         (e.g. ,i utf8-length)
-              #/\u2014/ "---"      ; ---        (e.g. ,i lambda)
-              #/\u00df/ "[Eszett]" ; eszett     (e.g. ,i char-upcase)
-              )))
-
-(define viewer-sub
-  (cond [(cond-expand
-          [(and gauche.os.windows
-                (not gauche.ces.none))
-           (use os.windows)
-           (guard (e [else #f])
-             (and (sys-isatty 1)
-                  (sys-get-console-mode 
-                   (sys-get-std-handle STD_OUTPUT_HANDLE))
-                  (not (= (sys-get-console-output-cp) 65001))))] ;unicode cp
-          [else #f])
-         viewer-nounicode]
-        [(or (equal? (sys-getenv "TERM") "emacs")
+(define (select-viewer)
+  (set! *pager* (get-pager))
+  (cond [(or (equal? (sys-getenv "TERM") "emacs")
              (equal? (sys-getenv "TERM") "dumb")
-             (not (sys-isatty (current-output-port)))
+             (cond-expand
+              ;; for MSYS (mintty)
+              [gauche.os.windows]
+              [else (not (sys-isatty (current-output-port)))])
              (not *pager*))
          viewer-dumb]
         [else 
          viewer-pager]))
 
-(define (viewer s)
-  (set! *pager* (get-pager))
-  (viewer-sub s))
+(define (nounicode s)
+  (cond-expand
+   [(and gauche.os.windows
+         (not gauche.ces.none))
+    (use os.windows)
+    (if (guard (e [else #f])
+          (and (sys-isatty 1)
+               (sys-get-console-mode (sys-get-std-handle STD_OUTPUT_HANDLE))
+               (not (= (sys-get-console-output-cp) 65001))))
+      ($ regexp-replace-all* s
+         #/\u21d2/ "==>"      ; @result{}
+         #/\u2026/ "..."      ; @dots{}
+         #/\u2018/ "`"        ; @code{}
+         #/\u2019/ "'"        ; @code{}
+         #/\u201C/ "``"       ; ``         (e.g. ,i do)
+         #/\u201D/ "''"       ; ''         (e.g. ,i do)
+         #/\u2261/ "=="       ; @equiv{}   (e.g. ,i cut)
+         #/\u2212/ "-"        ; @minus     (e.g. ,i modulo)
+         #/\u2022/ "*"        ; @bullet    (e.g. ,i lambda)
+         #/\u2013/ "--"       ; --         (e.g. ,i utf8-length)
+         #/\u2014/ "---"      ; ---        (e.g. ,i lambda)
+         #/\u00df/ "[Eszett]" ; eszett     (e.g. ,i char-upcase)
+         ))]
+   [else s]))
+
+(define (viewer s ces)
+  ((select-viewer) (nounicode s) ces))
 
 (define (get-info-paths)
   (let* ([syspath (cond [(sys-getenv "INFOPATH") => (cut string-split <> #\:)]
@@ -215,11 +219,6 @@
         (set! repl-info1 (make <repl-info> :info info1 :index index1))
         (hash-table-put! *repl-info-cache* info-file repl-info1)))))
 
-(define (with-ces-conv-output ces thunk)
-  (if ces
-    (with-output-conversion (current-output-port) thunk :encoding ces)
-    (thunk)))
-
 (define (get-node&line key index1)
   (reverse (hash-table-get index1 (x->string key) '())))
 
@@ -231,7 +230,9 @@
      (print "There are multiple entries for " key ":")
      (for-each-with-index
       (^[i e]
-        (with-ces-conv-output ces2 (^[] (format #t "~2d. ~s\n" (+ i 1) (car e)))))
+        (with-output-conversion (current-output-port)
+          (^[] (format #t "~2d. ~s\n" (+ i 1) (car e)))
+          :encoding (or ces2 "none")))
       es)
      (let loop ()
        (format #t "Select number, or q to cancel [1]: ") (flush)
@@ -261,7 +262,7 @@
                 (str  (if (or (null? (cdr node&line)) page-flag)
                         (~ node 'content)
                         (info-extract-definition node (cadr node&line)))))
-           (with-ces-conv-output ces1 (cut viewer str)))))))
+           (viewer str ces1))))))
 
 ;; API
 (define (info2 key :optional (info-file-sym #f) (ces1 #f) (ces2 #t) (cache-reset #f))
@@ -307,7 +308,7 @@
         (print #"No entry matching ~|rx|")
         (let1 str (with-output-to-string
                     (^[] (for-each format-search-result-entry entries)))
-          (with-ces-conv-output ces1 (cut viewer str)))))
+          (viewer str ces1))))
     (values)))
 
 
@@ -333,10 +334,7 @@
 ;; Read an info file FILE, and returns a list of strings splitted by ^_ (#\u001f)
 ;; If FILE is not found, look for compressed one.
 (define (read-info-file-split file opts)
-  (define ces (if (or (not    *info2-info-file-ces*)
-                      (equal? *info2-info-file-ces* ""))
-                "none"
-                *info2-info-file-ces*))
+  (define ces (or *info2-info-file-ces* "none"))
   (define (with-input-from-info thunk)
     (cond [(file-exists? file)
            (call-with-input-file file
