@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2016-10-28 v1.19
+;; 2017-8-20 v1.20
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -53,7 +53,7 @@
   (use gauche.sequence)
   (use gauche.charconv)
   (use gauche.version)
-  (export info2 info2-page))
+  (export info2 info2-page info2-search))
 (select-module info2)
 
 (define *info-file-default* "gauche-refe.info")
@@ -84,8 +84,12 @@
       "Index - 変数索引"          ; gauche-refj.info
       "変数索引"                  ; gauche-gl-refj.info, gauche-al-refj.info
       )]))
-(define *info-table*        (make-hash-table 'equal?))
-(define *info-index-table*  (make-hash-table 'equal?))
+
+(define-class <repl-info> ()
+  ((info  :init-keyword :info)   ;; <info-file>
+   (index :init-keyword :index)  ;; hashtable name -> [(node-name line-no)]
+   ))
+(define *repl-info-cache* (make-hash-table 'equal?))
 
 (define *pager* #f)
 
@@ -117,26 +121,56 @@
 
 (define (viewer-dumb s) (display s))
 
-(define viewer
-  (lambda (s)
-    (set! *pager* (get-pager))
-    (cond [(or (equal? (sys-getenv "TERM") "emacs")
-               (equal? (sys-getenv "TERM") "dumb")
-               (cond-expand
-                ;; for MSYS (mintty)
-                [gauche.os.windows]
-                [else (not (sys-isatty (current-output-port)))])
-               (not *pager*))
-           (viewer-dumb s)]
-          [else
-           (viewer-pager s)])))
+(define (viewer-nounicode s)
+  (display ($ regexp-replace-all* s
+              #/\u21d2/ "==>"      ; @result{}
+              #/\u2026/ "..."      ; @dots{}
+              #/\u2018/ "`"        ; @code{}
+              #/\u2019/ "'"        ; @code{}
+              #/\u201C/ "``"       ; ``         (e.g. ,i do)
+              #/\u201D/ "''"       ; ''         (e.g. ,i do)
+              #/\u2261/ "=="       ; @equiv{}   (e.g. ,i cut)
+              #/\u2212/ "-"        ; @minus     (e.g. ,i modulo)
+              #/\u2022/ "*"        ; @bullet    (e.g. ,i lambda)
+              #/\u2013/ "--"       ; --         (e.g. ,i utf8-length)
+              #/\u2014/ "---"      ; ---        (e.g. ,i lambda)
+              #/\u00df/ "[Eszett]" ; eszett     (e.g. ,i char-upcase)
+              )))
+
+(define viewer-sub
+  (cond [(cond-expand
+          [(and gauche.os.windows
+                (not gauche.ces.none))
+           (use os.windows)
+           (guard (e [else #f])
+             (and (sys-isatty 1)
+                  (sys-get-console-mode 
+                   (sys-get-std-handle STD_OUTPUT_HANDLE))
+                  (not (= (sys-get-console-output-cp) 65001))))] ;unicode cp
+          [else #f])
+         viewer-nounicode]
+        [(or (equal? (sys-getenv "TERM") "emacs")
+             (equal? (sys-getenv "TERM") "dumb")
+             (not (sys-isatty (current-output-port)))
+             (not *pager*))
+         viewer-dumb]
+        [else 
+         viewer-pager]))
+
+(define (viewer s)
+  (set! *pager* (get-pager))
+  (viewer-sub s))
 
 (define (get-info-paths)
   (let* ([syspath (cond [(sys-getenv "INFOPATH") => (cut string-split <> #\:)]
                         [else '()])]
          [instpath (list (gauche-config "--infodir"))]
-         [in-place (list "../doc")])
-    (append syspath instpath in-place)))
+         [in-place (cond-expand
+                    [gauche.in-place (if (member "../../lib" *load-path*)
+                                       '("../../doc")
+                                       '("../doc"))]
+                    [else '()])])
+    (append in-place syspath instpath)))
 
 (define (find-info-file info-file)
   (let1 paths (get-info-paths)
@@ -151,48 +185,53 @@
         (errorf "couldn't find info file ~s in paths: ~s" info-file paths))
     ))
 
-(define (get-info&index info-file cache-reset)
-  (let ((info1  (hash-table-get *info-table*       info-file #f))
-        (index1 (hash-table-get *info-index-table* info-file #f)))
-    (when (or (not info1) cache-reset)
-      (set! info1  (open-info-file (find-info-file info-file)))
-      (set! index1 (make-hash-table 'string=?))
-      (let ((node       #f)
+(define (get-repl-info info-file cache-reset)
+  (rlet1 repl-info1 (hash-table-get *repl-info-cache* info-file #f)
+    (when (or (not repl-info1) cache-reset)
+      (let ((info1      (open-info-file (find-info-file info-file)))
+            (index1     (make-hash-table 'string=?))
+            (node       #f)
             (entry-name "")
-            (hit-flag   #f)
-            (class-flag #f))
+            (hit-flag   #f))
         (dolist [node-name *index-node-name*]
-          (set! class-flag (if (#/(class|クラス)/i node-name) #t #f))
           (set! node (info-get-node info1 node-name))
           (when node
             (dolist [p (info-parse-menu node)]
               (set! entry-name (car p))
+              ;; When there are more than one entry with the same name, texinfo appends
+              ;; " <n>" in the index entry.  This strips that.
               (if-let1 m (#/ <\d+>$/ entry-name)
                 (set! entry-name (rxmatch-before m)))
-              (if class-flag
+              ;; class index doesn't have surrounding '<>', but we want to search
+              ;; with them.
+              (if (#/(class|クラス)/i node-name)
                 (set! entry-name #"<~|entry-name|>"))
               ;; For Gauche v0.9.4 compatibility
               ;(hash-table-push! index1 entry-name (cdr p)))
               (hash-table-push! index1 entry-name
                                 (if (pair? (cdr p)) (cdr p) (list (cdr p)))))
             (set! hit-flag #t)))
-        (if (not hit-flag) (errorf "no index in info file ~s" info-file)))
-      (hash-table-put! *info-table*       info-file info1)
-      (hash-table-put! *info-index-table* info-file index1))
-    (cons info1 index1)))
+        (unless hit-flag (errorf "no index in info file ~s" info-file))
+        (set! repl-info1 (make <repl-info> :info info1 :index index1))
+        (hash-table-put! *repl-info-cache* info-file repl-info1)))))
 
-(define (ces-conv-str ces str)
-  (if ces (ces-convert str (gauche-character-encoding) ces) str))
+(define (with-ces-conv-output ces thunk)
+  (if ces
+    (with-output-conversion (current-output-port) thunk :encoding ces)
+    (thunk)))
+
+(define (get-node&line key index1)
+  (reverse (hash-table-get index1 (x->string key) '())))
 
 (define (lookup&show key index1 ces2 show)
-  (match (reverse (hash-table-get index1 (x->string key) '()))
+  (match (get-node&line key index1)
     [()  (print "No info document for " key)]
     [(e) (show e)]
     [(es ...)
      (print "There are multiple entries for " key ":")
      (for-each-with-index
       (^[i e]
-        (print (ces-conv-str ces2 (format "~2d. ~s" (+ i 1) (car e)))))
+        (with-ces-conv-output ces2 (^[] (format #t "~2d. ~s\n" (+ i 1) (car e)))))
       es)
      (let loop ()
        (format #t "Select number, or q to cancel [1]: ") (flush)
@@ -210,36 +249,76 @@
          [else (loop)]))])
   (values))
 
-(define (info2-sub fn info-file-sym ces1 ces2 cache-reset page-flag)
+(define (info2-sub key info-file-sym ces1 ces2 cache-reset page-flag)
   (let* ((info-file  (if info-file-sym
                        (x->string info-file-sym)
                        *info-file-default*))
-         (info&index (get-info&index info-file cache-reset))
-         (info1      (car info&index))
-         (index1     (cdr info&index)))
+         (repl-info1 (get-repl-info info-file cache-reset)))
     (if (eq? ces2 #t) (set! ces2 ces1))
-    ($ lookup&show fn index1 ces2
+    ($ lookup&show key (~ repl-info1 'index) ces2
        (^[node&line]
-         (let* ((node (info-get-node info1 (car node&line)))
+         (let* ((node (info-get-node (~ repl-info1 'info) (car node&line)))
                 (str  (if (or (null? (cdr node&line)) page-flag)
                         (~ node 'content)
                         (info-extract-definition node (cadr node&line)))))
-           (viewer (ces-conv-str ces1 str)))))
+           (with-ces-conv-output ces1 (cut viewer str)))))))
+
+;; API
+(define (info2 key :optional (info-file-sym #f) (ces1 #f) (ces2 #t) (cache-reset #f))
+  (info2-sub key info-file-sym ces1 ces2 cache-reset #f))
+
+;; API
+(define (info2-page key :optional (info-file-sym #f) (ces1 #f) (ces2 #t) (cache-reset #f))
+  (info2-sub key info-file-sym ces1 ces2 cache-reset #t))
+
+;;
+;; Search info entries by regexp
+;;
+
+(define (search-entries rx index1)
+  (sort (filter (^e (rx (car e))) (hash-table->alist index1))
+        string<? car))
+
+(define *search-entry-indent* 25)
+
+(define (format-search-result-entry entry) ; (key (node line) ...)
+  (define indent (make-string *search-entry-indent* #\space))
+  (define (subsequent-lines node&lines)
+    (dolist [l node&lines]
+      (format #t "~va~a:~d\n" *search-entry-indent* " " (car l) (cadr l))))
+  (match-let1 (key node&lines ...) entry
+    (if (> (string-length key) (- *search-entry-indent* 1))
+      (begin (print key) (subsequent-lines node&lines))
+      (begin (format #t "~va ~a:~d\n" (- *search-entry-indent* 1) key
+                     (caar node&lines) (cadar node&lines))
+             (subsequent-lines (cdr node&lines))))))
+
+;; API
+(define (info2-search rx :optional (info-file-sym #f) (ces1 #f) (cache-reset #f))
+  (let* ((info-file  (if info-file-sym
+                       (x->string info-file-sym)
+                       *info-file-default*))
+         (repl-info1 (get-repl-info info-file cache-reset)))
+    ;; For Gauche v0.9.4 compatibility
+    ;(assume-type rx <regexp>)
+    (check-arg (cut is-a? <> <regexp>) rx)
+    (let1 entries (search-entries rx (~ repl-info1 'index))
+      (if (null? entries)
+        (print #"No entry matching ~|rx|")
+        (let1 str (with-output-to-string
+                    (^[] (for-each format-search-result-entry entries)))
+          (with-ces-conv-output ces1 (cut viewer str)))))
     (values)))
-
-;; API
-(define (info2 fn :optional (info-file-sym #f) (ces1 #f) (ces2 #t) (cache-reset #f))
-  (info2-sub fn info-file-sym ces1 ces2 cache-reset #f))
-
-;; API
-(define (info2-page fn :optional (info-file-sym #f) (ces1 #f) (ces2 #t) (cache-reset #f))
-  (info2-sub fn info-file-sym ces1 ces2 cache-reset #t))
 
 
 
 (select-module text.info)
 
 (use gauche.charconv)
+
+(export *info2-info-file-ces*)
+
+(define *info2-info-file-ces* "*JP") ; set encoding of info files
 
 ;; Overwrite some definitions in text.info module.
 
@@ -254,22 +333,26 @@
 ;; Read an info file FILE, and returns a list of strings splitted by ^_ (#\u001f)
 ;; If FILE is not found, look for compressed one.
 (define (read-info-file-split file opts)
+  (define ces (if (or (not    *info2-info-file-ces*)
+                      (equal? *info2-info-file-ces* ""))
+                "none"
+                *info2-info-file-ces*))
   (define (with-input-from-info thunk)
     (cond [(file-exists? file)
            (call-with-input-file file
-             (^p (let1 cp (wrap-with-input-conversion p "*JP") ; encoding conversion
+             (^p (let1 cp (wrap-with-input-conversion p ces) ; encoding conversion
                    (unwind-protect (with-input-from-port cp thunk)
                      (close-input-port cp)))))]
           [(file-exists? #`",|file|.gz")
            (call-with-input-file #`",|file|.gz"
              (^p (let1 zp (open-inflating-port p :window-bits 31) ; force gzip format
-                   (let1 cp (wrap-with-input-conversion zp "*JP") ; encoding conversion
+                   (let1 cp (wrap-with-input-conversion zp ces) ; encoding conversion
                      (unwind-protect (with-input-from-port cp thunk)
                        (close-input-port cp))))))]
           [(and bzip2 (file-exists? #`",|file|.bz2"))
            ;; For Windows, a file name should be surrounded in quotation marks.
            (call-with-input-process #`",bzip2 -c -d ',|file|.bz2'"
-             (^p (let1 cp (wrap-with-input-conversion p "*JP") ; encoding conversion
+             (^p (let1 cp (wrap-with-input-conversion p ces) ; encoding conversion
                    (unwind-protect (with-input-from-port cp thunk)
                      (close-input-port cp)))))]
           [else (error "can't find info file" file)]))
@@ -342,6 +425,8 @@
                 [(#/^ {6}/ line)     ;; folded entry line
                  (print line) (entry (read-line))]
                 [(#/^ {5}...$/ line) ;; dots between entry line
+                 (print line) (entry (read-line))]
+                [(#/^ {5}\u2026$/ line) ;; dots between entry line (unicode)
                  (print line) (entry (read-line))]
                 [(#/^ {5}\S/ line)   ;; start description
                  (print line)
