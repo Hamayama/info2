@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-8-21 v1.22
+;; 2017-8-21 v1.23
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -54,8 +54,10 @@
   (use gauche.charconv)
   (use gauche.version)
   (cond-expand [gauche.os.windows (use os.windows)] [else])
-  (export info2 info2-page info2-search))
+  (export info2 info2-page info2-search *info-file-ces*))
 (select-module info2)
+
+(define *info-file-ces* "*JP") ; set encoding of info files
 
 (define *info-file-default* "gauche-refe.info")
 (define *info-file-plus*    '("" ".info" "-refe.info"))
@@ -125,6 +127,17 @@
   (with-output-conversion (current-output-port)
     (cut display s) :encoding (or ces "none")))
 
+(define (windows-console?)
+  (cond-expand
+   [gauche.os.windows
+    ;; MSVCRT's isatty always returns 0 for mintty on MSYS
+    ;; (except for using winpty).
+    (or (not (sys-getenv "MSYSCON"))
+        (sys-isatty (standard-input-port))
+        (sys-isatty (standard-output-port))
+        (sys-isatty (standard-error-port)))]
+   [else #f]))
+
 (define (windows-console-redirected?)
   (cond-expand
    [gauche.os.windows
@@ -138,14 +151,13 @@
   (cond [(or (equal? (sys-getenv "TERM") "emacs")
              (equal? (sys-getenv "TERM") "dumb")
              ;; for Windows console
-             ;; NB: Both sys-isatty and windows-console-redirected? don't
-             ;;     work on MSYS (mintty). So, these checks are skipped
-             ;;     as a workaround.
+             ;; NB: sys-isatty and windows-console-redirected? don't
+             ;;     work on MSYS (mintty). So, we skip these checks
+             ;;     in such a case as a workaround.
              (cond-expand
               [gauche.os.windows
-               (if (sys-getenv "MSYSTEM")
-                 #f
-                 (windows-console-redirected?))]
+               (and (windows-console?)
+                    (windows-console-redirected?))]
               [else
                (not (sys-isatty (current-output-port)))])
              (not *pager*))
@@ -158,10 +170,9 @@
    [(and gauche.os.windows
          (not gauche.ces.none))
     ;; for Windows console
-    (if (or (sys-getenv "MSYSTEM")
-            (windows-console-redirected?)
-            (= (sys-get-console-output-cp) 65001))
-      s
+    (if (and (windows-console?)
+             (not (windows-console-redirected?))
+             (not (= (sys-get-console-output-cp) 65001)))
       ($ regexp-replace-all* s
          #/\u21d2/ "==>"      ; @result{}
          #/\u2026/ "..."      ; @dots{}
@@ -175,7 +186,8 @@
          #/\u2013/ "--"       ; --         (e.g. ,i utf8-length)
          #/\u2014/ "---"      ; ---        (e.g. ,i lambda)
          #/\u00df/ "[Eszett]" ; eszett     (e.g. ,i char-upcase)
-         ))]
+         )
+      s)]
    [else s]))
 
 (define (viewer s ces)
@@ -342,10 +354,6 @@
 
 (use gauche.charconv)
 
-(export *info-file-ces*)
-
-(define *info-file-ces* "*JP") ; set encoding of info files
-
 ;; Overwrite some definitions in text.info module.
 
 ;; Find bzip2 location
@@ -359,7 +367,7 @@
 ;; Read an info file FILE, and returns a list of strings splitted by ^_ (#\u001f)
 ;; If FILE is not found, look for compressed one.
 (define (read-info-file-split file opts)
-  (define ces (or *info-file-ces* "none"))
+  (define ces (or (with-module info2 *info-file-ces*) "none"))
   (define (with-input-from-info thunk)
     (cond [(file-exists? file)
            (call-with-input-file file
