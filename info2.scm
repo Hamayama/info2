@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-8-21 v1.24
+;; 2017-8-22 v1.25
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -320,6 +320,7 @@
                                                                   (cadr l)
                                                                   ""))))
   (match-let1 (key node&lines ...) entry
+    (set! node&lines (reverse node&lines))
     (if (> (string-length key) (- *search-entry-indent* 1))
       (begin (print key) (subsequent-lines node&lines))
       ;; For Gauche v0.9.4 compatibility
