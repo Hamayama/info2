@@ -1,12 +1,12 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-8-21 v1.21
+;; 2017-8-21 v1.22
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
-;;   標準の info 手続きは、検索する infoファイル名が gauche-refe.info に固定となって
-;;   いますが、info2 手続きは、検索する infoファイル名を 指定することができます。
+;;   標準の info 手続きは、検索する infoファイル名が gauche-refe.info に固定と
+;;   なっていますが、info2 手続きは、検索する infoファイル名を 指定することができます。
 ;;
 ;;   詳細については、以下のページを参照ください。
 ;;   https://github.com/Hamayama/info2
@@ -53,6 +53,7 @@
   (use gauche.sequence)
   (use gauche.charconv)
   (use gauche.version)
+  (cond-expand [gauche.os.windows (use os.windows)] [else])
   (export info2 info2-page info2-search))
 (select-module info2)
 
@@ -124,14 +125,29 @@
   (with-output-conversion (current-output-port)
     (cut display s) :encoding (or ces "none")))
 
+(define (windows-console-redirected?)
+  (cond-expand
+   [gauche.os.windows
+    (guard (e [else #t])
+      (sys-get-console-mode (sys-get-std-handle STD_OUTPUT_HANDLE))
+      #f)]
+   [else #f]))
+
 (define (select-viewer)
   (set! *pager* (get-pager))
   (cond [(or (equal? (sys-getenv "TERM") "emacs")
              (equal? (sys-getenv "TERM") "dumb")
+             ;; for Windows console
+             ;; NB: Both sys-isatty and windows-console-redirected? don't
+             ;;     work on MSYS (mintty). So, these checks are skipped
+             ;;     as a workaround.
              (cond-expand
-              ;; for MSYS (mintty)
-              [gauche.os.windows]
-              [else (not (sys-isatty (current-output-port)))])
+              [gauche.os.windows
+               (if (sys-getenv "MSYSTEM")
+                 #f
+                 (windows-console-redirected?))]
+              [else
+               (not (sys-isatty (current-output-port)))])
              (not *pager*))
          viewer-dumb]
         [else 
@@ -141,11 +157,11 @@
   (cond-expand
    [(and gauche.os.windows
          (not gauche.ces.none))
-    (use os.windows)
-    (if (guard (e [else #f])
-          (and (sys-isatty 1)
-               (sys-get-console-mode (sys-get-std-handle STD_OUTPUT_HANDLE))
-               (not (= (sys-get-console-output-cp) 65001))))
+    ;; for Windows console
+    (if (or (sys-getenv "MSYSTEM")
+            (windows-console-redirected?)
+            (= (sys-get-console-output-cp) 65001))
+      s
       ($ regexp-replace-all* s
          #/\u21d2/ "==>"      ; @result{}
          #/\u2026/ "..."      ; @dots{}
@@ -286,12 +302,21 @@
   (define indent (make-string *search-entry-indent* #\space))
   (define (subsequent-lines node&lines)
     (dolist [l node&lines]
-      (format #t "~va~a:~d\n" *search-entry-indent* " " (car l) (cadr l))))
+      ;; For Gauche v0.9.4 compatibility
+      ;(format #t "~va~a:~d\n" *search-entry-indent* " " (car l) (cadr l))))
+      (format #t "~va~a:~d\n" *search-entry-indent* " " (car l) (if (pair? (cdr l))
+                                                                  (cadr l)
+                                                                  ""))))
   (match-let1 (key node&lines ...) entry
     (if (> (string-length key) (- *search-entry-indent* 1))
       (begin (print key) (subsequent-lines node&lines))
+      ;; For Gauche v0.9.4 compatibility
+      ;(begin (format #t "~va ~a:~d\n" (- *search-entry-indent* 1) key
+      ;               (caar node&lines) (cadar node&lines))
       (begin (format #t "~va ~a:~d\n" (- *search-entry-indent* 1) key
-                     (caar node&lines) (cadar node&lines))
+                     (caar node&lines) (if (pair? (cdar node&lines))
+                                         (cadar node&lines)
+                                         ""))
              (subsequent-lines (cdr node&lines))))))
 
 ;; API
@@ -317,9 +342,9 @@
 
 (use gauche.charconv)
 
-(export *info2-info-file-ces*)
+(export *info-file-ces*)
 
-(define *info2-info-file-ces* "*JP") ; set encoding of info files
+(define *info-file-ces* "*JP") ; set encoding of info files
 
 ;; Overwrite some definitions in text.info module.
 
@@ -334,7 +359,7 @@
 ;; Read an info file FILE, and returns a list of strings splitted by ^_ (#\u001f)
 ;; If FILE is not found, look for compressed one.
 (define (read-info-file-split file opts)
-  (define ces (or *info2-info-file-ces* "none"))
+  (define ces (or *info-file-ces* "none"))
   (define (with-input-from-info thunk)
     (cond [(file-exists? file)
            (call-with-input-file file
@@ -409,6 +434,8 @@
                 ;[(#/^ --/ line) (loop (- n 1) (list line))]
                 [(#/^ --/ line) (loop (- n 1) (cons line lines))]
                 [(#/^ {10}/ line) (loop (- n 1) (cons line lines))]
+                ;; For header printing problem (e.g. (info 'cdddar) )
+                [(#/^ {5}\.\.\.$/ line) (loop (- n 1) (cons line lines))]
                 [else (loop (- n 1) '())])))))
 
   ;; Once the start line is found, we find the start of description (since
@@ -422,7 +449,8 @@
                 [(#/^$/ line)]       ;; no description
                 [(#/^ {6}/ line)     ;; folded entry line
                  (print line) (entry (read-line))]
-                [(#/^ {5}...$/ line) ;; dots between entry line
+                ;[(#/^ {5}...$/ line) ;; dots between entry line
+                [(#/^ {5}\.\.\.$/ line) ;; dots between entry line
                  (print line) (entry (read-line))]
                 [(#/^ {5}\u2026$/ line) ;; dots between entry line (unicode)
                  (print line) (entry (read-line))]
