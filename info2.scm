@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-8-22 v1.25
+;; 2017-8-23 v1.26
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -127,42 +127,21 @@
   (with-output-conversion (current-output-port)
     (cut display s) :encoding (or ces "none")))
 
-(define (windows-console?)
-  (cond-expand
-   [gauche.os.windows
-    ;; MSVCRT's isatty always returns 0 for mintty on MSYS
-    ;; (except for using winpty).
-    (or (not (sys-getenv "MSYSCON"))
-        (sys-isatty (standard-input-port))
-        (sys-isatty (standard-output-port))
-        (sys-isatty (standard-error-port)))]
-   [else #f]))
-
-(define (windows-console-redirected?)
-  (cond-expand
-   [gauche.os.windows
-    (guard (e [else #t])
-      (sys-get-console-mode (sys-get-std-handle STD_OUTPUT_HANDLE))
-      #f)]
-   [else #f]))
+;; for MSYS (mintty)
+(define sys-mintty?
+  (if (global-variable-bound? 'gauche.internal '%sys-mintty?)
+    (with-module gauche.internal %sys-mintty?)
+    (^[port-or-fd] #f)))
 
 (define (select-viewer)
   (set! *pager* (get-pager))
   (cond [(or (equal? (sys-getenv "TERM") "emacs")
              (equal? (sys-getenv "TERM") "dumb")
-             ;; for Windows console
-             ;; NB: sys-isatty and windows-console-redirected? don't
-             ;;     work on MSYS (mintty). So, we skip these checks
-             ;;     in such a case as a workaround.
-             (cond-expand
-              [gauche.os.windows
-               (and (windows-console?)
-                    (windows-console-redirected?))]
-              [else
-               (not (sys-isatty (current-output-port)))])
+             (not (or (sys-isatty  (current-output-port))
+                      (sys-mintty? (current-output-port))))
              (not *pager*))
          viewer-dumb]
-        [else 
+        [else
          viewer-pager]))
 
 (define (nounicode s)
@@ -170,8 +149,7 @@
    [(and gauche.os.windows
          (not gauche.ces.none))
     ;; for Windows console
-    (if (and (windows-console?)
-             (not (windows-console-redirected?))
+    (if (and (sys-isatty (current-output-port))
              (not (= (sys-get-console-output-cp) 65001)))
       ($ regexp-replace-all* s
          #/\u21d2/ "==>"      ; @result{}
@@ -368,7 +346,9 @@
 ;; Read an info file FILE, and returns a list of strings splitted by ^_ (#\u001f)
 ;; If FILE is not found, look for compressed one.
 (define (read-info-file-split file opts)
-  (define ces (or (with-module info2 *info-file-ces*) "none"))
+  (define ces (if (global-variable-bound? 'info2 '*info-file-ces*)
+                (or (with-module info2 *info-file-ces*) "none")
+                "none"))
   (define (with-input-from-info thunk)
     (cond [(file-exists? file)
            (call-with-input-file file
