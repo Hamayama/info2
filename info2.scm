@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-8-23 v1.26
+;; 2017-8-26 v1.27
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -216,7 +216,7 @@
               ;; with them.
               (if (#/(class|クラス)/i node-name)
                 (set! entry-name #"<~|entry-name|>"))
-              ;; For Gauche v0.9.4 compatibility
+              ;; for Gauche v0.9.4 compatibility
               ;(hash-table-push! index1 entry-name (cdr p)))
               (hash-table-push! index1 entry-name
                                 (if (pair? (cdr p)) (cdr p) (list (cdr p)))))
@@ -242,7 +242,7 @@
       es)
      (let loop ()
        (format #t "Select number, or q to cancel [1]: ") (flush)
-       ;; For Gauche v0.9.4 compatibility
+       ;; for Gauche v0.9.4 compatibility
        (if (version<=? (gauche-version) "0.9.4") (read-line))
        (rxmatch-case (read-line)
          [test eof-object? #f]
@@ -292,7 +292,7 @@
   (define indent (make-string *search-entry-indent* #\space))
   (define (subsequent-lines node&lines)
     (dolist [l node&lines]
-      ;; For Gauche v0.9.4 compatibility
+      ;; for Gauche v0.9.4 compatibility
       ;(format #t "~va~a:~d\n" *search-entry-indent* " " (car l) (cadr l))))
       (format #t "~va~a:~d\n" *search-entry-indent* " " (car l) (if (pair? (cdr l))
                                                                   (cadr l)
@@ -301,7 +301,7 @@
     (set! node&lines (reverse node&lines))
     (if (> (string-length key) (- *search-entry-indent* 1))
       (begin (print key) (subsequent-lines node&lines))
-      ;; For Gauche v0.9.4 compatibility
+      ;; for Gauche v0.9.4 compatibility
       ;(begin (format #t "~va ~a:~d\n" (- *search-entry-indent* 1) key
       ;               (caar node&lines) (cadar node&lines))
       (begin (format #t "~va ~a:~d\n" (- *search-entry-indent* 1) key
@@ -316,7 +316,7 @@
                        (x->string info-file-sym)
                        *info-file-default*))
          (repl-info1 (get-repl-info info-file cache-reset)))
-    ;; For Gauche v0.9.4 compatibility
+    ;; for Gauche v0.9.4 compatibility
     ;(assume-type rx <regexp>)
     (check-arg (cut is-a? <> <regexp>) rx)
     (let1 entries (search-entries rx (~ repl-info1 'index))
