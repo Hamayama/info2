@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-8-26 v1.27
+;; 2017-9-1 v1.28
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -172,7 +172,10 @@
   ((select-viewer) (nounicode s) ces))
 
 (define (get-info-paths)
-  (let* ([syspath (cond [(sys-getenv "INFOPATH") => (cut string-split <> #\:)]
+  (let* ([syspath (cond [(sys-getenv "INFOPATH")
+                         => (cut string-split <> (cond-expand
+                                                  [gauche.os.windows #\;]
+                                                  [else #\:]))]
                         [else '()])]
          [instpath (list (gauche-config "--infodir"))]
          [in-place (cond-expand
@@ -201,8 +204,7 @@
       (let ((info1      (open-info-file (find-info-file info-file)))
             (index1     (make-hash-table 'string=?))
             (node       #f)
-            (entry-name "")
-            (hit-flag   #f))
+            (entry-name ""))
         (dolist [node-name *index-node-name*]
           (set! node (info-get-node info1 node-name))
           (when node
@@ -219,17 +221,18 @@
               ;; for Gauche v0.9.4 compatibility
               ;(hash-table-push! index1 entry-name (cdr p)))
               (hash-table-push! index1 entry-name
-                                (if (pair? (cdr p)) (cdr p) (list (cdr p)))))
-            (set! hit-flag #t)))
-        (unless hit-flag (errorf "no index in info file ~s" info-file))
+                                (if (pair? (cdr p)) (cdr p) (list (cdr p)))))))
+        (if (<= (hash-table-num-entries index1) 0)
+          (errorf "no index in info file ~s" info-file))
+        ($ hash-table-for-each index1
+           ;; reverse v here so that earlier entry listed first
+           (^[k v] (hash-table-put! index1 k (reverse v))))
         (set! repl-info1 (make <repl-info> :info info1 :index index1))
         (hash-table-put! *repl-info-cache* info-file repl-info1)))))
 
-(define (get-node&line key index1)
-  (reverse (hash-table-get index1 (x->string key) '())))
-
 (define (lookup&show key index1 ces2 show)
-  (match (get-node&line key index1)
+  (define node&lines (hash-table-get index1 (x->string key) '()))
+  (match node&lines
     [()  (print "No info document for " key)]
     [(e) (show e)]
     [(es ...)
@@ -298,7 +301,6 @@
                                                                   (cadr l)
                                                                   ""))))
   (match-let1 (key node&lines ...) entry
-    (set! node&lines (reverse node&lines))
     (if (> (string-length key) (- *search-entry-indent* 1))
       (begin (print key) (subsequent-lines node&lines))
       ;; for Gauche v0.9.4 compatibility
