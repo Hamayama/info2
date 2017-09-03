@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-9-1 v1.28
+;; 2017-9-4 v1.29
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -100,7 +100,7 @@
   (cond-expand
    [gauche.os.windows
     (or (sys-getenv "PAGER")
-        ;; These commands don't work well on Windows console.
+        ;; These commands don't work well on windows console.
         ;(find-file-in-paths "less.exe") ; It has a problem of printing wide characters.
         ;(find-file-in-paths "more.com") ; It works only when ces is a kind of Shift_JIS.
         )]
@@ -133,12 +133,20 @@
     (with-module gauche.internal %sys-mintty?)
     (^[port-or-fd] #f)))
 
+;; On windows, current ports are useless to check a redirection.
+(define (redirected-stdout?)
+  (cond-expand
+   [gauche.os.windows
+    (not (or (sys-isatty  (standard-output-port))
+             (sys-mintty? (standard-output-port))))]
+   [else
+    (not (sys-isatty (current-output-port)))]))
+
 (define (select-viewer)
   (set! *pager* (get-pager))
   (cond [(or (equal? (sys-getenv "TERM") "emacs")
              (equal? (sys-getenv "TERM") "dumb")
-             (not (or (sys-isatty  (current-output-port))
-                      (sys-mintty? (current-output-port))))
+             (redirected-stdout?)
              (not *pager*))
          viewer-dumb]
         [else
@@ -148,8 +156,8 @@
   (cond-expand
    [(and gauche.os.windows
          (not gauche.ces.none))
-    ;; for Windows console
-    (if (and (sys-isatty (current-output-port))
+    ;; for windows console
+    (if (and (sys-isatty (standard-output-port))
              (not (= (sys-get-console-output-cp) 65001)))
       ($ regexp-replace-all* s
          #/\u21d2/ "==>"      ; @result{}
@@ -201,10 +209,10 @@
 (define (get-repl-info info-file cache-reset)
   (rlet1 repl-info1 (hash-table-get *repl-info-cache* info-file #f)
     (when (or (not repl-info1) cache-reset)
-      (let ((info1      (open-info-file (find-info-file info-file)))
-            (index1     (make-hash-table 'string=?))
-            (node       #f)
-            (entry-name ""))
+      (let ([info1      (open-info-file (find-info-file info-file))]
+            [index1     (make-hash-table 'string=?)]
+            [node       #f]
+            [entry-name ""])
         (dolist [node-name *index-node-name*]
           (set! node (info-get-node info1 node-name))
           (when node
@@ -260,10 +268,10 @@
   (values))
 
 (define (info2-sub key info-file-sym ces1 ces2 cache-reset page-flag)
-  (let* ((info-file  (if info-file-sym
+  (let* ([info-file  (if info-file-sym
                        (x->string info-file-sym)
-                       *info-file-default*))
-         (repl-info1 (get-repl-info info-file cache-reset)))
+                       *info-file-default*)]
+         [repl-info1 (get-repl-info info-file cache-reset)])
     (if (eq? ces2 #t) (set! ces2 ces1))
     ($ lookup&show key (~ repl-info1 'index) ces2
        (^[node&line]
@@ -364,7 +372,7 @@
                      (unwind-protect (with-input-from-port cp thunk)
                        (close-input-port cp))))))]
           [(and bzip2 (file-exists? #`",|file|.bz2"))
-           ;; For Windows, a file name should be surrounded in quotation marks.
+           ;; For windows, a file name should be surrounded in quotation marks.
            (call-with-input-process #`",bzip2 -c -d ',|file|.bz2'"
              (^p (let1 cp (wrap-with-input-conversion p ces) ; encoding conversion
                    (unwind-protect (with-input-from-port cp thunk)
