@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-9-4 v1.29
+;; 2017-9-7 v1.30
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -133,20 +133,21 @@
     (with-module gauche.internal %sys-mintty?)
     (^[port-or-fd] #f)))
 
-;; On windows, current ports are useless to check a redirection.
-(define (redirected-stdout?)
+(define (redirected? port)
   (cond-expand
    [gauche.os.windows
-    (not (or (sys-isatty  (standard-output-port))
-             (sys-mintty? (standard-output-port))))]
+    (not (or (sys-isatty  port)
+             (sys-mintty? port)))]
    [else
-    (not (sys-isatty (current-output-port)))]))
+    (not (sys-isatty port))]))
 
 (define (select-viewer)
   (set! *pager* (get-pager))
   (cond [(or (equal? (sys-getenv "TERM") "emacs")
              (equal? (sys-getenv "TERM") "dumb")
-             (redirected-stdout?)
+             ;; workaround for encoding conversion
+             ;(redirected? (current-output-port))
+             (redirected? (standard-output-port))]
              (not *pager*))
          viewer-dumb]
         [else
