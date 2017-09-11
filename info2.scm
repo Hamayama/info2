@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-9-7 v1.30
+;; 2017-9-11 v1.31
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -147,7 +147,7 @@
              (equal? (sys-getenv "TERM") "dumb")
              ;; workaround for encoding conversion
              ;(redirected? (current-output-port))
-             (redirected? (standard-output-port))]
+             (redirected? (standard-output-port))
              (not *pager*))
          viewer-dumb]
         [else
