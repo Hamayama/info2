@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-9-11 v1.31
+;; 2017-9-11 v1.32
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -136,8 +136,11 @@
 (define (redirected? port)
   (cond-expand
    [gauche.os.windows
-    (not (or (sys-isatty  port)
-             (sys-mintty? port)))]
+    (not (or (sys-isatty port)
+             ;; for MSYS (mintty)
+             (sys-mintty? port)
+             ;; for windows console conversion ports
+             (#/^windows console conversion/ (~ port'name))))]
    [else
     (not (sys-isatty port))]))
 
@@ -145,9 +148,7 @@
   (set! *pager* (get-pager))
   (cond [(or (equal? (sys-getenv "TERM") "emacs")
              (equal? (sys-getenv "TERM") "dumb")
-             ;; workaround for encoding conversion
-             ;(redirected? (current-output-port))
-             (redirected? (standard-output-port))
+             (redirected? (current-output-port))
              (not *pager*))
          viewer-dumb]
         [else
