@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-9-11 v1.32
+;; 2017-9-24 v1.33
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -131,7 +131,13 @@
 (define sys-mintty?
   (if (global-variable-bound? 'gauche.internal '%sys-mintty?)
     (with-module gauche.internal %sys-mintty?)
-    (^[port-or-fd] #f)))
+    (lambda (port-or-fd) #f)))
+
+;; for windows console conversion ports
+(define port-attribute-ref
+  (if (global-variable-bound? 'gauche 'port-attribute-ref)
+    (with-module gauche port-attribute-ref)
+    (lambda (port key :optional fallback) #f)))
 
 (define (redirected? port)
   (cond-expand
@@ -140,7 +146,7 @@
              ;; for MSYS (mintty)
              (sys-mintty? port)
              ;; for windows console conversion ports
-             (#/^windows console conversion/ (~ port'name))))]
+             (port-attribute-ref port 'windows-console-conversion #f)))]
    [else
     (not (sys-isatty port))]))
 
