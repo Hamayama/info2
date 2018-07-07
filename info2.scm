@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2017-9-24 v1.33
+;; 2018-7-8 v1.34
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -99,22 +99,28 @@
 (define (get-pager)
   (cond-expand
    [gauche.os.windows
-    (or (sys-getenv "PAGER")
+    (or (and-let1 s (sys-getenv "PAGER")
+          (shell-tokenize-string s))
         ;; These commands don't work well on windows console.
-        ;(find-file-in-paths "less.exe") ; It has a problem of printing wide characters.
-        ;(find-file-in-paths "more.com") ; It works only when ces is a kind of Shift_JIS.
+        ;; ('less' has a problem of printing wide characters.
+        ;;  'more' works only when ces is a kind of Shift_JIS.)
+        ;(and-let1 cmd (or (find-file-in-paths "less")
+        ;                  (find-file-in-paths "more"))
+        ;  (list cmd))
         )]
    [else
-    (or (sys-getenv "PAGER")
-        (find-file-in-paths "less")
-        (find-file-in-paths "more")
+    (or (and-let1 s (sys-getenv "PAGER")
+          (shell-tokenize-string s))
+        (and-let1 cmd (or (find-file-in-paths "less")
+                          (find-file-in-paths "more"))
+          (list cmd))
         )]))
 
 (define (viewer-pager s ces)
   (let1 p (run-process
            (cond-expand
             ;; for MSYS (mintty)
-            [gauche.os.windows `("cmd.exe" "/c" ,*pager*)]
+            [gauche.os.windows `("cmd.exe" "/c" ,@*pager*)]
             [else              *pager*])
            :input :pipe)
     (guard (e (else #f))
@@ -387,7 +393,7 @@
                      (close-input-port cp)))))]
           [else (error "can't find info file" file)]))
   (with-input-from-info
-   (lambda ()
+   (^[]
      (let loop ([c (skip-while (char-set-complement #[\u001f]))]
                 [r '()])
        (if (eof-object? c)
