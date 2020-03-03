@@ -1,50 +1,15 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2018-7-8 v1.35
+;; 2020-3-4 v2.00
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
-;;   標準の info 手続きは、検索する infoファイル名が gauche-refe.info に固定と
-;;   なっていますが、info2 手続きは、検索する infoファイル名を 指定することができます。
+;;   標準の info 手続きは、検索する info ファイル名が gauche-refe.info に固定と
+;;   なっていますが、info2 手続きは、検索する info ファイル名を 指定することができます。
 ;;
 ;;   詳細については、以下のページを参照ください。
 ;;   https://github.com/Hamayama/info2
-;;
-;; ＜インストール方法＞
-;;   info2.scm を Gauche でロード可能なフォルダにコピーします。
-;;   (例えば (gauche-site-library-directory) で表示されるフォルダ等)
-;;
-;; ＜使い方＞
-;;   (use info2)                     ; モジュールをロードします
-;;   (info2 'car)                    ; car 手続きの説明を英語で表示します
-;;   (info2 'car 'gauche-refj)       ; car 手続きの説明を日本語で表示します
-;;                                   ;   (Gauche v0.9.4, v0.9.5 では文字化けが発生します)
-;;   (info2 'car 'gauche-refj 'SJIS) ; car 手続きの説明を日本語のシフトJISで表示します
-;;                                   ;   (Gauche v0.9.6 ではエラーになります)
-;;
-;; ＜書式＞
-;;   info2 手続きの書式は以下の通りです。
-;;   info2  name  [file]  [ces1]  [ces2]  [cache-reset]
-;;   ・第1引数の name には、調べたい手続きの名前をシンボルか文字列で指定します。
-;;   ・第2引数の file には、infoファイルの名前をシンボルか文字列で指定します。
-;;     このとき、ファイル名の末尾の .info または -refe.info は省略可能です。
-;;     また、第2引数全体も省略可能です。省略した場合には gauche-refe.info が
-;;     読み込まれます。
-;;   ・第3引数の ces1 には、出力する説明文の文字エンコーディングを指定します。
-;;     例えば、Windows のコンソールに日本語を出力する場合には 'SJIS を指定してください。
-;;     (Gauche v0.9.6 では、自動変換と競合するため、指定するとエラーになります)
-;;     第3引数に #f を指定すると、文字エンコーディングは未指定になります。
-;;     また、第3引数は省略可能です。省略した場合には #f を指定したことになります。
-;;   ・第4引数の ces2 には、検索結果が複数存在する場合に出力するセクション名の
-;;     文字エンコーディングを指定します。
-;;     第4引数に #f を指定すると、文字エンコーディングは未指定になります。
-;;     第4引数に #t を指定すると、文字エンコーディングは ces1 と同じものになります。
-;;     また、第4引数は省略可能です。省略した場合には #t を指定したことになります。
-;;   ・第5引数の cache-reset には、キャッシュをリセットするかどうかを指定します。
-;;     すでに読み込んだ infoファイルは、キャッシュに保存され高速検索が可能になりますが、
-;;     本引数に #t を指定すると、キャッシュを破棄してファイルを再読み込みします。
-;;     第5引数は省略可能です。省略した場合には #f を指定したことになります。
 ;;
 (define-module info2
   (use srfi-1)
@@ -256,7 +221,7 @@
         (set! repl-info1 (make <repl-info> :info info1 :index index1))
         (hash-table-put! *repl-info-cache* info-file repl-info1)))))
 
-(define (lookup&show key index1 ces2 show)
+(define (lookup&show key index1 ces2 select-no show)
   (define node&lines (hash-table-get index1 (x->string key) '()))
   (match node&lines
     [()  (print "No info document for " key)]
@@ -269,29 +234,43 @@
           (^[] (format #t "~2d. ~s\n" (+ i 1) (car e)))
           :encoding (or ces2 "none")))
       es)
-     (let loop ()
-       (format #t "Select number, or q to cancel [1]: ") (flush)
-       ;; for Gauche v0.9.4 compatibility
-       (if (version<=? (gauche-version) "0.9.4") (read-line))
-       (rxmatch-case (read-line)
-         [test eof-object? #f]
-         [#/^\s*$/ (_) (show (car es))]  ; the first entry by default
-         [#/^\s*(\d+)\s*$/ (_ N)
-          (let1 n (- (x->integer N) 1)
-            (if (and (<= 0 n) (< n (length es)))
-              (show (list-ref es n))
-              (loop)))]
-         [#/^\s*q\s*$/ (_) #f]
-         [else (loop)]))])
+     (if select-no
+       ;; select-no is specified
+       (if-let1 n (rxmatch-case (x->string select-no)
+                    [#/^\s*(\d+)\s*$/ (_ N)
+                     (let1 n (- (x->integer N) 1)
+                       (if (and (<= 0 n) (< n (length es)))
+                         n
+                         #f))]
+                    [else #f])
+         (begin
+           (format #t "Selected number is ~d~%" (+ n 1))
+           (show (list-ref es n)))
+         (format #t "Selected number is invalid (~a)~%" (x->string select-no)))
+       ;; select-no is not specified
+       (let loop ()
+         (format #t "Select number, or q to cancel [1]: ") (flush)
+         ;; for Gauche v0.9.4 compatibility
+         (if (version<=? (gauche-version) "0.9.4") (read-line))
+         (rxmatch-case (read-line)
+           [test eof-object? #f]
+           [#/^\s*$/ (_) (show (car es))]  ; the first entry by default
+           [#/^\s*(\d+)\s*$/ (_ N)
+            (let1 n (- (x->integer N) 1)
+              (if (and (<= 0 n) (< n (length es)))
+                (show (list-ref es n))
+                (loop)))]
+           [#/^\s*q\s*$/ (_) #f]
+           [else (loop)])))])
   (values))
 
-(define (info2-sub key info-file-sym ces1 ces2 cache-reset page-flag)
+(define (info2-sub key info-file-sym ces1 ces2 cache-reset select-no page-flag)
   (let* ([info-file  (if info-file-sym
                        (x->string info-file-sym)
                        *info-file-default*)]
          [repl-info1 (get-repl-info info-file cache-reset)])
     (if (eq? ces2 #t) (set! ces2 ces1))
-    ($ lookup&show key (~ repl-info1 'index) ces2
+    ($ lookup&show key (~ repl-info1 'index) ces2 select-no
        (^[node&line]
          (let* ((node (info-get-node (~ repl-info1 'info) (car node&line)))
                 (str  (if (or (null? (cdr node&line)) page-flag)
@@ -300,12 +279,24 @@
            (viewer str ces1))))))
 
 ;; API
-(define (info2 key :optional (info-file-sym #f) (ces1 #f) (ces2 #t) (cache-reset #f))
-  (info2-sub key info-file-sym ces1 ces2 cache-reset #f))
+(define (info2 key
+               :key
+               ((:f  info-file-sym) #f)
+               ((:c1 ces1) #f)
+               ((:c2 ces2) #t)
+               ((:cr cache-reset) #f)
+               ((:n  select-no) #f))
+  (info2-sub key info-file-sym ces1 ces2 cache-reset select-no #f))
 
 ;; API
-(define (info2-page key :optional (info-file-sym #f) (ces1 #f) (ces2 #t) (cache-reset #f))
-  (info2-sub key info-file-sym ces1 ces2 cache-reset #t))
+(define (info2-page key
+                    :key
+                    ((:f  info-file-sym) #f)
+                    ((:c1 ces1) #f)
+                    ((:c2 ces2) #t)
+                    ((:cr cache-reset) #f)
+                    ((:n  select-no) #f))
+  (info2-sub key info-file-sym ces1 ces2 cache-reset select-no #t))
 
 ;;
 ;; Search info entries by regexp
@@ -339,7 +330,11 @@
              (subsequent-lines (cdr node&lines))))))
 
 ;; API
-(define (info2-search rx :optional (info-file-sym #f) (ces1 #f) (cache-reset #f))
+(define (info2-search rx
+                      :key
+                      ((:f  info-file-sym) #f)
+                      ((:c1 ces1) #f)
+                      ((:cr cache-reset) #f))
   (let* ((info-file  (if info-file-sym
                        (x->string info-file-sym)
                        *info-file-default*))
