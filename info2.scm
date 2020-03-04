@@ -1,7 +1,7 @@
 ;; -*- coding: utf-8 -*-
 ;;
 ;; info2.scm
-;; 2020-3-4 v2.00
+;; 2020-3-4 v2.01
 ;;
 ;; ＜内容＞
 ;;   Gauche で info 手続きを拡張した info2 手続きを使用可能にするためのモジュールです。
@@ -64,6 +64,16 @@
 (define *repl-info-cache* (make-hash-table 'equal?))
 
 (define *pager* #f)
+
+;; for Gauche v0.9.4 compatibility
+(define-syntax and-let1
+  (syntax-rules ()
+    [(and-let1 var test exp exp2 ...)
+     (let ((var test)) (and var (begin exp exp2 ...)))]))
+(define shell-tokenize-string
+  (if (global-variable-bound? 'gauche.process 'shell-tokenize-string)
+    (with-module gauche.process shell-tokenize-string)
+    (lambda (s) (list s))))
 
 (define (get-pager)
   (cond-expand
@@ -217,9 +227,37 @@
           (errorf "no index in info file ~s" info-file))
         ($ hash-table-for-each index1
            ;; reverse v here so that earlier entry listed first
-           (^[k v] (hash-table-put! index1 k (reverse v))))
+           (^[k v] (hash-table-put! index1 k (squash-entries (reverse v)))))
         (set! repl-info1 (make <repl-info> :info info1 :index index1))
         (hash-table-put! *repl-info-cache* info-file repl-info1)))))
+
+;; We sometimes list API variations using @defunx.  We want to pick only
+;; the first one of such entries.
+(define (squash-entries node&lines)
+  ;; for Gauche v0.9.4 compatibility
+  ;(if (length=? node&lines 1)
+  ;  node&lines
+  ;  (append-map (^[node&lines]
+  ;                ($ map (^l `(,(caar node&lines) ,(car l)))
+  ;                   $ group-contiguous-sequence $ sort $ map cadr node&lines))
+  ;       (group-collection node&lines :key car :test equal?))))
+  (define cmpfn1 equal?)
+  (define keyfn1 car)
+  (define cmpfn2 (^[v1 v2] (= (+ v1 1) v2)))
+  (define keyfn2 cadr)
+  (if (<= (length node&lines) 1)
+    node&lines
+    (let loop ([lst      node&lines]
+               [ret      '()]
+               [hit-prev #f])
+      (if (null? lst)
+        (reverse ret)
+        (let ([hit (and (not (null? (cdr lst)))
+                        (cmpfn1 (keyfn1 (car lst)) (keyfn1 (cadr lst)))
+                        (cmpfn2 (keyfn2 (car lst)) (keyfn2 (cadr lst))))])
+          (loop (cdr lst)
+                (if hit-prev ret (cons (car lst) ret))
+                hit))))))
 
 (define (lookup&show key index1 ces2 select-no show)
   (define node&lines (hash-table-get index1 (x->string key) '()))
@@ -244,9 +282,9 @@
                          #f))]
                     [else #f])
          (begin
-           (format #t "Selected number is ~d~%" (+ n 1))
+           (format #t "Selected number is ~d.~%" (+ n 1))
            (show (list-ref es n)))
-         (format #t "Selected number is invalid (~a)~%" (x->string select-no)))
+         (format #t "Selected number is invalid (~a).~%" (x->string select-no)))
        ;; select-no is not specified
        (let loop ()
          (format #t "Select number, or q to cancel [1]: ") (flush)
@@ -335,13 +373,17 @@
                       ((:f  info-file-sym) #f)
                       ((:c1 ces1) #f)
                       ((:cr cache-reset) #f))
-  (let* ((info-file  (if info-file-sym
+  (let* ([info-file  (if info-file-sym
                        (x->string info-file-sym)
-                       *info-file-default*))
-         (repl-info1 (get-repl-info info-file cache-reset)))
+                       *info-file-default*)]
+         [repl-info1 (get-repl-info info-file cache-reset)])
+
     ;; for Gauche v0.9.4 compatibility
     ;(assume-type rx <regexp>)
-    (check-arg (cut is-a? <> <regexp>) rx)
+    ;(check-arg (cut is-a? <> <regexp>) rx)
+    (unless (regexp? rx)
+      (errorf "first argument must be of type ~s, but got ~s" <regexp> rx))
+
     (let1 entries (search-entries rx (~ repl-info1 'index))
       (if (null? entries)
         (print #"No entry matching ~|rx|")
